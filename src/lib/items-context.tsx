@@ -10,6 +10,7 @@ import {
   CreateItemInput,
   ApiItemsResponse,
   ApiItemResponse,
+  ApiMatchActionResponse,
   ApiSeedResponse,
 } from "./types";
 import { evaluateItemMatch, findMatches } from "./matching-engine";
@@ -27,11 +28,21 @@ interface ItemsContextType {
   addLostItem: (itemData: Omit<CreateItemInput, "id" | "type" | "status" | "createdAt">) => Promise<LostFoundItem>;
   addFoundItem: (itemData: Omit<CreateItemInput, "id" | "type" | "status" | "createdAt">) => Promise<LostFoundItem>;
   updateItemStatus: (id: string, status: ItemStatus) => Promise<void>;
-  updateMatchStatus: (matchId: string, status: MatchStatus) => void;
+  updateMatchStatus: (
+    matchId: string,
+    actionOrStatus: MatchStatus | "verify" | "claim" | "reject" | "unverify",
+    matchData?: {
+      lostItemId?: string;
+      foundItemId?: string;
+      overallScore?: number;
+      matchTier?: MatchResult["matchTier"];
+    }
+  ) => Promise<void>;
   getItemById: (id: string) => LostFoundItem | undefined;
   getMatchesForItem: (id: string) => MatchResult[];
   findLiveMatchesForDraft: (draft: Partial<LostFoundItem>, type: ReportType) => MatchResult[];
   resetToMockData: () => Promise<void>;
+  refreshData: () => Promise<void>;
 }
 
 const ItemsContext = createContext<ItemsContextType | undefined>(undefined);
@@ -55,6 +66,7 @@ function normalizeDbItem(raw: Item | LostFoundItem): LostFoundItem {
     holdingLocation: raw.holdingLocation || undefined,
     isAnonymous: Boolean(raw.isAnonymous),
     status: raw.status,
+    matchedItemId: raw.matchedItemId || undefined,
     embedding: raw.embedding || undefined,
     createdAt: raw.createdAt,
   };
@@ -66,22 +78,67 @@ export function ItemsProvider({ children }: { children: React.ReactNode }) {
   const [minMatchScore, setMinMatchScore] = useState<number>(40);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  const fetchAllData = useCallback(async () => {
+    try {
+      const [itemsRes, matchesRes] = await Promise.all([
+        fetch("/api/items"),
+        fetch("/api/matches"),
+      ]);
+
+      if (itemsRes.ok) {
+        const itemsData = (await itemsRes.json()) as ApiItemsResponse;
+        if (itemsData.items && Array.isArray(itemsData.items)) {
+          setItemsList(itemsData.items.map(normalizeDbItem));
+        }
+      }
+
+      if (matchesRes.ok) {
+        const matchesData = (await matchesRes.json()) as { matches: Array<{ id: string; status: MatchStatus }> };
+        if (matchesData.matches && Array.isArray(matchesData.matches)) {
+          const statusMap: Record<string, MatchStatus> = {};
+          for (const m of matchesData.matches) {
+            statusMap[m.id] = m.status;
+          }
+          setMatchStatusMap(statusMap);
+        }
+      }
+    } catch (err: unknown) {
+      console.error("Failed to fetch items and matches from SQLite DB:", getErrorMessage(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let ignore = false;
 
-    async function loadItems() {
+    async function loadInitialData() {
       try {
-        const res = await fetch("/api/items");
-        if (res.ok) {
-          const data = (await res.json()) as ApiItemsResponse;
-          if (!ignore && data.items && Array.isArray(data.items)) {
-            const normalized = data.items.map(normalizeDbItem);
-            setItemsList(normalized);
+        const [itemsRes, matchesRes] = await Promise.all([
+          fetch("/api/items"),
+          fetch("/api/matches"),
+        ]);
+
+        if (itemsRes.ok) {
+          const itemsData = (await itemsRes.json()) as ApiItemsResponse;
+          if (!ignore && itemsData.items && Array.isArray(itemsData.items)) {
+            setItemsList(itemsData.items.map(normalizeDbItem));
+          }
+        }
+
+        if (matchesRes.ok) {
+          const matchesData = (await matchesRes.json()) as { matches: Array<{ id: string; status: MatchStatus }> };
+          if (!ignore && matchesData.matches && Array.isArray(matchesData.matches)) {
+            const statusMap: Record<string, MatchStatus> = {};
+            for (const m of matchesData.matches) {
+              statusMap[m.id] = m.status;
+            }
+            setMatchStatusMap(statusMap);
           }
         }
       } catch (err: unknown) {
         if (!ignore) {
-          console.error("Failed to fetch items from SQLite DB:", getErrorMessage(err));
+          console.error("Failed to fetch items and matches from SQLite DB:", getErrorMessage(err));
         }
       } finally {
         if (!ignore) {
@@ -90,7 +147,7 @@ export function ItemsProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    loadItems();
+    loadInitialData();
 
     return () => {
       ignore = true;
@@ -105,14 +162,45 @@ export function ItemsProvider({ children }: { children: React.ReactNode }) {
     return itemsList.filter((i) => i.type === "found");
   }, [itemsList]);
 
-  // Dynamically compute all matches based on database items
+  // Dynamically compute all matches based on database items and apply DB status & supersedence rules
   const matches = useMemo(() => {
     const rawMatches = findMatches(lostItems, foundItems, minMatchScore);
+
     return rawMatches.map((m) => {
-      const savedStatus = matchStatusMap[m.id];
-      return savedStatus ? { ...m, status: savedStatus } : m;
+      const savedStatus = matchStatusMap[m.id] || "unreviewed";
+      const lost = itemsList.find((i) => i.id === m.lostItem.id) || m.lostItem;
+      const found = itemsList.find((i) => i.id === m.foundItem.id) || m.foundItem;
+
+      // Determine supersedence
+      let isSuperseded = false;
+      let supersededReason: string | undefined = undefined;
+
+      const isLostClaimedElsewhere = lost.status === "claimed" && lost.matchedItemId !== found.id;
+      const isFoundClaimedElsewhere = found.status === "claimed" && found.matchedItemId !== lost.id;
+
+      if (savedStatus !== "claimed") {
+        if (isLostClaimedElsewhere && isFoundClaimedElsewhere) {
+          isSuperseded = true;
+          supersededReason = "Both items have already been claimed in other reports.";
+        } else if (isLostClaimedElsewhere) {
+          isSuperseded = true;
+          supersededReason = `Lost item "${lost.title}" has already been claimed with another found report.`;
+        } else if (isFoundClaimedElsewhere) {
+          isSuperseded = true;
+          supersededReason = `Found item "${found.title}" has already been returned and claimed.`;
+        }
+      }
+
+      return {
+        ...m,
+        lostItem: lost,
+        foundItem: found,
+        status: savedStatus,
+        isSuperseded,
+        supersededReason,
+      };
     });
-  }, [lostItems, foundItems, minMatchScore, matchStatusMap]);
+  }, [lostItems, foundItems, minMatchScore, matchStatusMap, itemsList]);
 
   const allItems = useMemo(() => {
     return [...itemsList].sort(
@@ -223,8 +311,116 @@ export function ItemsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateMatchStatus = useCallback(
-    (matchId: string, status: MatchStatus) => {
-      setMatchStatusMap((prev) => ({ ...prev, [matchId]: status }));
+    async (
+      matchId: string,
+      actionOrStatus: MatchStatus | "verify" | "claim" | "reject" | "unverify",
+      matchData?: {
+        lostItemId?: string;
+        foundItemId?: string;
+        overallScore?: number;
+        matchTier?: MatchResult["matchTier"];
+      }
+    ) => {
+      let action: "verify" | "claim" | "reject" | "unverify" = "unverify";
+      let targetStatus: MatchStatus = "unreviewed";
+
+      if (actionOrStatus === "verify" || actionOrStatus === "confirmed") {
+        action = "verify";
+        targetStatus = "confirmed";
+      } else if (actionOrStatus === "claim" || actionOrStatus === "claimed") {
+        action = "claim";
+        targetStatus = "claimed";
+      } else if (actionOrStatus === "reject" || actionOrStatus === "rejected") {
+        action = "reject";
+        targetStatus = "rejected";
+      } else if (actionOrStatus === "unverify" || actionOrStatus === "unreviewed") {
+        action = "unverify";
+        targetStatus = "unreviewed";
+      }
+
+      // Infer lostItemId and foundItemId if not directly passed
+      let lostId = matchData?.lostItemId;
+      let foundId = matchData?.foundItemId;
+
+      if (!lostId || !foundId) {
+        const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+        const matchedUuids = matchId.match(uuidRegex);
+        if (matchedUuids && matchedUuids.length >= 2) {
+          lostId = matchedUuids[0];
+          foundId = matchedUuids[1];
+        }
+      }
+
+      // Optimistic Match Status Update
+      setMatchStatusMap((prev) => ({ ...prev, [matchId]: targetStatus }));
+
+      // Optimistic Item Statuses Update
+      if (lostId && foundId) {
+        if (action === "claim") {
+          setItemsList((prev) =>
+            prev.map((item) => {
+              if (item.id === lostId) return { ...item, status: "claimed", matchedItemId: foundId };
+              if (item.id === foundId) return { ...item, status: "claimed", matchedItemId: lostId };
+              return item;
+            })
+          );
+        } else if (action === "verify") {
+          setItemsList((prev) =>
+            prev.map((item) => {
+              if (item.id === lostId) return { ...item, status: "potential_match", matchedItemId: foundId };
+              if (item.id === foundId) return { ...item, status: "potential_match", matchedItemId: lostId };
+              return item;
+            })
+          );
+        } else if (action === "reject" || action === "unverify") {
+          setItemsList((prev) =>
+            prev.map((item) => {
+              if (
+                (item.id === lostId && item.matchedItemId === foundId) ||
+                (item.id === foundId && item.matchedItemId === lostId)
+              ) {
+                if (item.status !== "claimed") {
+                  return { ...item, status: "open", matchedItemId: undefined };
+                }
+              }
+              return item;
+            })
+          );
+        }
+
+        // Call backend API
+        try {
+          const res = await fetch("/api/matches", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              matchId,
+              lostItemId: lostId,
+              foundItemId: foundId,
+              action,
+              overallScore: matchData?.overallScore,
+              matchTier: matchData?.matchTier,
+            }),
+          });
+
+          if (res.ok) {
+            const data = (await res.json()) as ApiMatchActionResponse;
+            if (data.lostItem && data.foundItem) {
+              const normLost = normalizeDbItem(data.lostItem);
+              const normFound = normalizeDbItem(data.foundItem);
+              setItemsList((prev) =>
+                prev.map((i) => {
+                  if (i.id === normLost.id) return normLost;
+                  if (i.id === normFound.id) return normFound;
+                  return i;
+                })
+              );
+            }
+          }
+        } catch (err: unknown) {
+          console.error("Error updating match in database:", getErrorMessage(err));
+        }
+      }
     },
     []
   );
@@ -266,6 +462,9 @@ export function ItemsProvider({ children }: { children: React.ReactNode }) {
       const liveMatches: MatchResult[] = [];
 
       for (const candidate of candidates) {
+        // Exclude already claimed items from live drafts
+        if (candidate.status === "claimed") continue;
+
         const match =
           type === "lost"
             ? evaluateItemMatch(tempItem, candidate)
@@ -317,6 +516,7 @@ export function ItemsProvider({ children }: { children: React.ReactNode }) {
         getMatchesForItem,
         findLiveMatchesForDraft,
         resetToMockData,
+        refreshData: fetchAllData,
       }}
     >
       {children}

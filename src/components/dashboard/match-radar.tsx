@@ -9,17 +9,18 @@ import { Sparkles, ArrowRight, Zap } from "lucide-react";
 export function MatchRadar() {
   const { matches } = useItems();
 
-  const topMatches = matches.slice(0, 4);
-  const strongCount = matches.filter((m) => m.overallScore >= 80).length;
+  const activeMatches = matches.filter((m) => !m.isSuperseded && m.status !== "rejected");
+  const topMatches = activeMatches.slice(0, 4);
+  const strongCount = activeMatches.filter((m) => m.overallScore >= 80 && m.status !== "claimed").length;
 
-  if (matches.length === 0) {
+  if (activeMatches.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-200/90 bg-white p-8 text-center shadow-xs">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
           <Sparkles className="h-6 w-6" />
         </div>
         <h4 className="mt-3 font-bold text-slate-900">
-          No Potential Matches Above Threshold
+          No Active Potential Matches Above Threshold
         </h4>
         <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
           Submit new lost or found reports to trigger automated semantic matching.

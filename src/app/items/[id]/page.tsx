@@ -17,8 +17,11 @@ import {
   User,
   Sparkles,
   ShieldCheck,
+  CheckCircle2,
   Copy,
   Check,
+  Loader2,
+  ArrowRight,
 } from "lucide-react";
 
 export default function ItemDetailPage({
@@ -32,17 +35,41 @@ export default function ItemDetailPage({
   const resolvedSearchParams = searchParams ? use(searchParams) : undefined;
   const expectedType = resolvedSearchParams?.type;
 
-  const { getItemById, getMatchesForItem, updateItemStatus } = useItems();
+  const { getItemById, getMatchesForItem, updateMatchStatus } = useItems();
   const [copied, setCopied] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
 
   const item = getItemById(id);
   const matches = getMatchesForItem(id);
+
+  // Find confirmed or claimed matches for this item
+  const claimedMatch = matches.find((m) => m.status === "claimed");
+  const confirmedMatch = matches.find((m) => m.status === "confirmed");
+
+  // Paired item if claimed or confirmed
+  const pairedItemId = item?.matchedItemId || (claimedMatch ? (claimedMatch.lostItem.id === id ? claimedMatch.foundItem.id : claimedMatch.lostItem.id) : undefined);
+  const pairedItem = pairedItemId ? getItemById(pairedItemId) : undefined;
 
   const handleCopyId = () => {
     if (!item) return;
     navigator.clipboard.writeText(item.id);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleQuickClaim = async (matchToClaim: typeof confirmedMatch) => {
+    if (!matchToClaim) return;
+    setIsClaiming(true);
+    try {
+      await updateMatchStatus(matchToClaim.id, "claim", {
+        lostItemId: matchToClaim.lostItem.id,
+        foundItemId: matchToClaim.foundItem.id,
+        overallScore: matchToClaim.overallScore,
+        matchTier: matchToClaim.matchTier,
+      });
+    } finally {
+      setIsClaiming(false);
+    }
   };
 
   if (!item) {
@@ -67,7 +94,6 @@ export default function ItemDetailPage({
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
-
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/"
@@ -96,6 +122,85 @@ export default function ItemDetailPage({
         </div>
       </div>
 
+      {/* Claimed Status Banner with Paired Link */}
+      {item.status === "claimed" && (
+        <div className="rounded-3xl border border-emerald-300 bg-linear-to-r from-emerald-50 via-teal-50 to-emerald-50 p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-base font-bold text-emerald-950">
+                  Item Reconciled & Returned
+                </span>
+                <Badge variant="success" className="text-[10px] uppercase font-bold">
+                  Claimed
+                </Badge>
+              </div>
+              <p className="text-xs text-emerald-800 mt-0.5">
+                {pairedItem ? (
+                  <>
+                    Paired with {pairedItem.type === "lost" ? "Lost Report" : "Found Custody Report"}:{" "}
+                    <strong className="font-semibold text-emerald-950">&ldquo;{pairedItem.title}&rdquo;</strong>
+                  </>
+                ) : (
+                  "Official handover completed and logged in campus records."
+                )}
+              </p>
+            </div>
+          </div>
+
+          {pairedItem && (
+            <Link href={`/items/${pairedItem.id}?type=${pairedItem.type}`}>
+              <Button variant="outline" size="sm" className="border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-900 text-xs">
+                <span>View Paired Report</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* Confirmed Match Banner (Ready for Claim) */}
+      {item.status !== "claimed" && confirmedMatch && (
+        <div className="rounded-3xl border border-blue-300 bg-linear-to-r from-blue-50 via-indigo-50/50 to-blue-50 p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-md">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-base font-bold text-blue-950">
+                  Verified Candidate Match ({confirmedMatch.overallScore}% Confidence)
+                </span>
+                <span className="rounded-md bg-blue-200/70 px-2 py-0.5 text-[10px] font-bold text-blue-900 uppercase">
+                  Verified
+                </span>
+              </div>
+              <p className="text-xs text-blue-800 mt-0.5">
+                Verified candidate:{" "}
+                <strong className="font-semibold text-blue-950">
+                  &ldquo;{item.type === "lost" ? confirmedMatch.foundItem.title : confirmedMatch.lostItem.title}&rdquo;
+                </strong>
+                . Ready for physical pickup handover.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            variant="success"
+            size="sm"
+            onClick={() => handleQuickClaim(confirmedMatch)}
+            disabled={isClaiming}
+            className="cursor-pointer font-bold shadow-xs shrink-0"
+          >
+            {isClaiming ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+            <span>Confirm & Mark Claimed</span>
+          </Button>
+        </div>
+      )}
+
       {/* Main Detail Card */}
       <Card className="p-6 sm:p-8 space-y-6 bg-white border border-slate-200 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
@@ -109,7 +214,10 @@ export default function ItemDetailPage({
               >
                 {getCategoryLabel(item.category)}
               </span>
-              <Badge variant="outline" className="text-xs uppercase font-semibold">
+              <Badge
+                variant={item.status === "claimed" ? "success" : "outline"}
+                className="text-xs uppercase font-semibold"
+              >
                 {item.status}
               </Badge>
               {expectedType && expectedType === item.type && (
@@ -121,20 +229,6 @@ export default function ItemDetailPage({
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
               {item.title}
             </h1>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {item.status !== "claimed" && (
-              <Button
-                variant="success"
-                size="sm"
-                onClick={() => updateItemStatus(item.id, "claimed")}
-                className="text-xs"
-              >
-                <ShieldCheck className="h-4 w-4" />
-                <span>Mark as Claimed / Returned</span>
-              </Button>
-            )}
           </div>
         </div>
 
@@ -188,7 +282,7 @@ export default function ItemDetailPage({
           </div>
         </div>
 
-        {/* Details */}
+        {/* Custody details for found items */}
         {item.holdingLocation && (
           <div className="rounded-2xl bg-emerald-50 p-4 border border-emerald-200 flex items-center gap-3">
             <Building className="h-6 w-6 text-emerald-700 shrink-0" />

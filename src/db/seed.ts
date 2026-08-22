@@ -139,7 +139,7 @@ export const SEED_ITEMS: NewItem[] = [
 
 export async function seedDatabase() {
   try {
-    // 1. Ensure table exists with embedding column
+    // 1. Ensure table exists with embedding and matched_item_id columns
     await client.execute(`
       CREATE TABLE IF NOT EXISTS items (
         id TEXT PRIMARY KEY,
@@ -159,20 +159,41 @@ export async function seedDatabase() {
         holding_location TEXT,
         is_anonymous INTEGER DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'open',
+        matched_item_id TEXT,
         embedding TEXT,
         created_at TEXT NOT NULL
       )
     `);
 
-    // Ensure migration for existing tables that may miss 'embedding'
+    // Ensure migration for existing tables that may miss 'embedding' or 'matched_item_id'
     try {
       await client.execute(`ALTER TABLE items ADD COLUMN embedding TEXT`);
     } catch {
       // Column already exists
     }
+    try {
+      await client.execute(`ALTER TABLE items ADD COLUMN matched_item_id TEXT`);
+    } catch {
+      // Column already exists
+    }
 
-    // 2. Clear table to prevent duplicates
+    // Ensure matches table exists
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS matches (
+        id TEXT PRIMARY KEY,
+        lost_item_id TEXT NOT NULL,
+        found_item_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'unreviewed',
+        overall_score INTEGER,
+        match_tier TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    // 2. Clear tables to prevent duplicates
     await client.execute(`DELETE FROM items`);
+    await client.execute(`DELETE FROM matches`);
 
     // 3. Insert standardized 2 lost and 3 found items with vector embeddings
     for (const item of SEED_ITEMS) {

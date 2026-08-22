@@ -18,11 +18,14 @@ export async function PATCH(
 
     const updateData: Partial<NewItem> = {};
     if (body.status !== undefined) {
-      updateData.status = body.status
-    };
+      updateData.status = body.status;
+    }
     if (body.holdingLocation !== undefined) {
-      updateData.holdingLocation = body.holdingLocation
-    };
+      updateData.holdingLocation = body.holdingLocation;
+    }
+    if (body.matchedItemId !== undefined) {
+      updateData.matchedItemId = body.matchedItemId;
+    }
 
     await db.update(items).set(updateData).where(eq(items.id, id));
 

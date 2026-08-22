@@ -6,10 +6,9 @@ import { Search, Sparkles, CheckCircle2, Inbox } from "lucide-react";
 export function StatsOverview() {
   const { lostItems, foundItems, matches } = useItems();
 
-  const strongMatches = matches.filter((m) => m.overallScore >= 80).length;
-  const confirmedMatches = matches.filter(
-    (m) => m.status === "confirmed" || m.status === "claimed"
-  ).length;
+  const activeMatches = matches.filter((m) => !m.isSuperseded && m.status !== "rejected");
+  const strongMatches = activeMatches.filter((m) => m.overallScore >= 80 && m.status !== "claimed").length;
+  const claimedCount = matches.filter((m) => m.status === "claimed").length;
 
   const stats = [
     {
@@ -32,8 +31,8 @@ export function StatsOverview() {
     },
     {
       title: "Potential Matches",
-      value: matches.length,
-      badge: `${strongMatches} Strong`,
+      value: activeMatches.filter((m) => m.status !== "claimed").length,
+      badge: strongMatches > 0 ? `${strongMatches} Strong` : undefined,
       description: "Automated pairings found",
       icon: Sparkles,
       color: "text-indigo-600",
@@ -42,7 +41,7 @@ export function StatsOverview() {
     },
     {
       title: "Reconciled / Claimed",
-      value: confirmedMatches,
+      value: claimedCount,
       description: "Verified returns to owners",
       icon: CheckCircle2,
       color: "text-emerald-600",

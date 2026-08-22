@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { MatchResult } from "@/lib/types";
 import { Modal } from "@/components/ui/dialog";
@@ -18,6 +19,9 @@ import {
   Building,
   Tag,
   ShieldCheck,
+  RotateCcw,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 
 export function MatchComparisonModal({
@@ -29,30 +33,39 @@ export function MatchComparisonModal({
   isOpen: boolean;
   onClose: () => void;
 }) {
-  const { updateMatchStatus, updateItemStatus } = useItems();
+  const { updateMatchStatus } = useItems();
+  const [isPending, setIsPending] = useState(false);
 
   if (!match) return null;
 
-  const { lostItem, foundItem, overallScore, matchTier, breakdown, explanation, highlights } = match;
+  const {
+    lostItem,
+    foundItem,
+    overallScore,
+    matchTier,
+    breakdown,
+    explanation,
+    status,
+    isSuperseded,
+    supersededReason,
+  } = match;
   const tierMeta = getMatchTierMeta(matchTier, overallScore);
 
-  const handleConfirm = () => {
-    updateMatchStatus(match.id, "confirmed");
-    updateItemStatus(lostItem.id, "potential_match");
-    updateItemStatus(foundItem.id, "potential_match");
-    onClose();
-  };
-
-  const handleMarkClaimed = () => {
-    updateMatchStatus(match.id, "claimed");
-    updateItemStatus(lostItem.id, "claimed");
-    updateItemStatus(foundItem.id, "claimed");
-    onClose();
-  };
-
-  const handleReject = () => {
-    updateMatchStatus(match.id, "rejected");
-    onClose();
+  const handleAction = async (action: "verify" | "claim" | "reject" | "unverify") => {
+    setIsPending(true);
+    try {
+      await updateMatchStatus(match.id, action, {
+        lostItemId: lostItem.id,
+        foundItemId: foundItem.id,
+        overallScore,
+        matchTier,
+      });
+      if (action === "claim" || action === "reject") {
+        onClose();
+      }
+    } finally {
+      setIsPending(false);
+    }
   };
 
   return (
@@ -64,7 +77,45 @@ export function MatchComparisonModal({
       maxWidth="max-w-4xl"
     >
       <div className="space-y-6">
-        {/* Match Header Score Card */}
+        {/* Superseded Warning Banner if one of the items is claimed elsewhere */}
+        {isSuperseded && status !== "claimed" && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950 flex items-start gap-3 shadow-2xs">
+            <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+            <div className="text-xs space-y-1">
+              <h5 className="font-bold text-amber-900">Pairing No Longer Active (Item Claimed)</h5>
+              <p className="text-amber-800 leading-relaxed">
+                {supersededReason || "One or both items in this candidate pair have already been claimed and resolved in another match."}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Claimed Success Banner if this match is claimed */}
+        {status === "claimed" && (
+          <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-950 flex items-start gap-3 shadow-2xs">
+            <ShieldCheck className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
+            <div className="text-xs space-y-1">
+              <h5 className="font-bold text-emerald-900">✓ Item Return & Claim Reconciled</h5>
+              <p className="text-emerald-800 leading-relaxed">
+                This item report was successfully matched, confirmed, and recorded as returned to its owner.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {status === "confirmed" && (
+          <div className="rounded-2xl border border-blue-300 bg-blue-50 p-4 text-blue-950 flex items-start gap-3 shadow-2xs">
+            <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+            <div className="text-xs space-y-1">
+              <h5 className="font-bold text-blue-900">Verified Candidate Match</h5>
+              <p className="text-blue-800 leading-relaxed">
+                This match has been verified. Once the student collects their item at the custody desk, click &ldquo;Confirm & Mark Claimed&rdquo; to complete the reconciliation.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Score Card */}
         <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-blue-50/40 p-5 shadow-2xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -76,8 +127,28 @@ export function MatchComparisonModal({
                   <span className={`text-base font-bold ${tierMeta.textColor}`}>
                     {tierMeta.label}
                   </span>
-                  <Badge variant={matchTier === "strong" ? "success" : matchTier === "moderate" ? "warning" : "default"}>
-                    {overallScore >= 80 ? "High Confidence" : overallScore >= 60 ? "Moderate" : "Low"}
+                  <Badge
+                    variant={
+                      status === "claimed"
+                        ? "success"
+                        : status === "confirmed"
+                        ? "default"
+                        : matchTier === "strong"
+                        ? "success"
+                        : matchTier === "moderate"
+                        ? "warning"
+                        : "default"
+                    }
+                  >
+                    {status === "claimed"
+                      ? "Claimed & Closed"
+                      : status === "confirmed"
+                      ? "Verified Match"
+                      : overallScore >= 80
+                      ? "High Confidence"
+                      : overallScore >= 60
+                      ? "Moderate"
+                      : "Low"}
                   </Badge>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -89,8 +160,18 @@ export function MatchComparisonModal({
             {/* Status Indicator */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 font-medium">Status:</span>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-slate-700 border border-slate-200">
-                {match.status}
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider border ${
+                  status === "claimed"
+                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                    : status === "confirmed"
+                    ? "bg-blue-100 text-blue-800 border-blue-300"
+                    : status === "rejected"
+                    ? "bg-rose-100 text-rose-800 border-rose-300"
+                    : "bg-slate-100 text-slate-700 border-slate-200"
+                }`}
+              >
+                {status}
               </span>
             </div>
           </div>
@@ -107,9 +188,9 @@ export function MatchComparisonModal({
           </div>
         </div>
 
-        {/* Side-by-Side Comparison Columns */}
+        {/* Comparison Columns */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Lost Item Column */}
+          {/* Lost */}
           <div className="rounded-2xl border border-rose-200 bg-rose-50/50 p-5 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-rose-200/80">
               <Badge variant="lost" className="text-xs px-3 py-1 font-bold">
@@ -169,7 +250,7 @@ export function MatchComparisonModal({
             </div>
           </div>
 
-          {/* Found Item Column */}
+          {/* Found */}
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-emerald-200/80">
               <Badge variant="found" className="text-xs px-3 py-1 font-bold">
@@ -230,62 +311,94 @@ export function MatchComparisonModal({
           </div>
         </div>
 
-        {/* Scoring Breakdown & Key Shared Attributes */}
         <div className="space-y-4">
           <MatchBreakdownBar breakdown={breakdown} />
-
-          {/* Shared Signal Badges */}
-          {highlights.sharedKeywords.length > 0 && (
-            <div className="rounded-xl bg-slate-50 p-3.5 border border-slate-200 text-xs">
-              <span className="font-bold text-slate-800 block mb-2">
-                Shared Semantic Signals & Keywords:
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {highlights.sharedKeywords.map((kw, i) => (
-                  <span
-                    key={i}
-                    className="rounded-md bg-blue-50 px-2 py-1 font-mono text-[11px] font-bold text-blue-800 border border-blue-200"
-                  >
-                    {kw}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Action Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-200">
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={isPending}>
             Close
           </Button>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleReject}
-              className="text-rose-700 border-rose-200 hover:bg-rose-50"
-            >
-              <XCircle className="h-4 w-4" />
-              <span>Dismiss / Not a Match</span>
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleConfirm}
-            >
-              <CheckCircle2 className="h-4 w-4 text-blue-600" />
-              <span>Verify Match</span>
-            </Button>
-            <Button
-              variant="success"
-              size="sm"
-              onClick={handleMarkClaimed}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              <span>Confirm & Mark Claimed</span>
-            </Button>
+            {/* If Superseded, disable actions */}
+            {isSuperseded && status !== "claimed" ? (
+              <span className="text-xs text-amber-700 font-semibold italic">
+                Actions disabled: item already claimed in another pairing.
+              </span>
+            ) : status === "claimed" ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleAction("unverify")}
+                disabled={isPending}
+                className="text-slate-600 border-slate-200 hover:bg-slate-50"
+              >
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                <span>Reopen / Reset Claim</span>
+              </Button>
+            ) : (
+              <>
+                {status !== "rejected" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAction("reject")}
+                    disabled={isPending}
+                    className="text-rose-700 border-rose-200 hover:bg-rose-50 cursor-pointer"
+                  >
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                    <span>Dismiss / Not a Match</span>
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAction("unverify")}
+                    disabled={isPending}
+                    className="text-slate-700 border-slate-200 hover:bg-slate-50 cursor-pointer"
+                  >
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                    <span>Restore Candidate</span>
+                  </Button>
+                )}
+
+                {status === "confirmed" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAction("unverify")}
+                    disabled={isPending}
+                    className="text-slate-700 border-slate-200 hover:bg-slate-50 cursor-pointer"
+                  >
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                    <span>Unverify</span>
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleAction("verify")}
+                    disabled={isPending}
+                    className="cursor-pointer font-semibold"
+                  >
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin text-blue-600" /> : <CheckCircle2 className="h-4 w-4 text-blue-600" />}
+                    <span>Verify Match</span>
+                  </Button>
+                )}
+
+                <Button
+                  variant="success"
+                  size="sm"
+                  onClick={() => handleAction("claim")}
+                  disabled={isPending}
+                  className="cursor-pointer font-bold shadow-xs"
+                >
+                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  <span>Confirm & Mark Claimed</span>
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

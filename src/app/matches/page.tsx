@@ -4,30 +4,32 @@ import { useState, useMemo } from "react";
 import { useItems } from "@/lib/items-context";
 import { MatchCard } from "@/components/matches/match-card";
 import { MatchTier } from "@/lib/types";
-import { SlidersHorizontal, Sparkles } from "lucide-react";
+import { SlidersHorizontal, Sparkles, Filter } from "lucide-react";
 
 export default function MatchesPage() {
   const { matches, minMatchScore, setMinMatchScore } = useItems();
   const [selectedTier, setSelectedTier] = useState<"all" | MatchTier>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "unreviewed" | "confirmed" | "claimed">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "unreviewed" | "confirmed" | "claimed" | "rejected">("all");
 
   const filteredMatches = useMemo(() => {
     return matches.filter((m) => {
       if (selectedTier !== "all" && m.matchTier !== selectedTier) return false;
       if (statusFilter !== "all" && m.status !== statusFilter) return false;
+      // If statusFilter is "all" or "unreviewed", hide rejected by default unless explicit
+      if (statusFilter === "all" && m.status === "rejected") return false;
       return true;
     });
   }, [matches, selectedTier, statusFilter]);
 
-  const strongCount = matches.filter((m) => m.overallScore >= 80).length;
+  const strongCount = matches.filter((m) => m.overallScore >= 80 && m.status !== "rejected").length;
   const moderateCount = matches.filter(
-    (m) => m.overallScore >= 60 && m.overallScore < 80
+    (m) => m.overallScore >= 60 && m.overallScore < 80 && m.status !== "rejected"
   ).length;
-  const lowCount = matches.filter((m) => m.overallScore < 60).length;
+  const confirmedCount = matches.filter((m) => m.status === "confirmed").length;
+  const claimedCount = matches.filter((m) => m.status === "claimed").length;
 
   return (
     <div className="space-y-6">
-
       <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 text-white shadow-xl">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2 max-w-xl">
@@ -46,7 +48,7 @@ export default function MatchesPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <div className="rounded-2xl bg-white/10 p-3.5 backdrop-blur-md border border-white/10 text-center min-w-[90px]">
+            <div className="rounded-2xl bg-white/10 p-3.5 backdrop-blur-md border border-white/10 text-center min-w-[85px]">
               <span className="block text-2xl font-black text-emerald-400 font-mono">
                 {strongCount}
               </span>
@@ -54,7 +56,7 @@ export default function MatchesPage() {
                 Strong (≥80%)
               </span>
             </div>
-            <div className="rounded-2xl bg-white/10 p-3.5 backdrop-blur-md border border-white/10 text-center min-w-[90px]">
+            <div className="rounded-2xl bg-white/10 p-3.5 backdrop-blur-md border border-white/10 text-center min-w-[85px]">
               <span className="block text-2xl font-black text-amber-400 font-mono">
                 {moderateCount}
               </span>
@@ -62,12 +64,20 @@ export default function MatchesPage() {
                 Moderate (60-79%)
               </span>
             </div>
-            <div className="rounded-2xl bg-white/10 p-3.5 backdrop-blur-md border border-white/10 text-center min-w-[90px]">
-              <span className="block text-2xl font-black text-slate-300 font-mono">
-                {lowCount}
+            <div className="rounded-2xl bg-white/10 p-3.5 backdrop-blur-md border border-white/10 text-center min-w-[85px]">
+              <span className="block text-2xl font-black text-blue-400 font-mono">
+                {confirmedCount}
               </span>
               <span className="text-[11px] text-slate-300 font-medium">
-                Low (&lt;60%)
+                Verified
+              </span>
+            </div>
+            <div className="rounded-2xl bg-white/10 p-3.5 backdrop-blur-md border border-white/10 text-center min-w-[85px]">
+              <span className="block text-2xl font-black text-emerald-300 font-mono">
+                {claimedCount}
+              </span>
+              <span className="text-[11px] text-slate-300 font-medium">
+                Claimed
               </span>
             </div>
           </div>
@@ -87,7 +97,7 @@ export default function MatchesPage() {
                   : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
             >
-              All Tiers ({matches.length})
+              All Tiers ({matches.filter((m) => m.status !== "rejected").length})
             </button>
             <button
               onClick={() => setSelectedTier("strong")}
@@ -109,30 +119,26 @@ export default function MatchesPage() {
             >
               Moderate ({moderateCount})
             </button>
-            <button
-              onClick={() => setSelectedTier("low")}
-              className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                selectedTier === "low"
-                  ? "bg-slate-700 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200"
-              }`}
-            >
-              Low ({lowCount})
-            </button>
 
-            {/* Status Filter */}
-            <select
-              value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(e.target.value as "all" | "unreviewed" | "confirmed" | "claimed")
-              }
-              className="h-8 rounded-xl border border-slate-200 bg-white px-2.5 text-xs text-slate-800 font-semibold focus:border-slate-900 focus:outline-none cursor-pointer shadow-2xs ml-1"
-            >
-              <option value="all">All Review Statuses</option>
-              <option value="unreviewed">Unreviewed</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="claimed">Claimed</option>
-            </select>
+            <div className="h-5 w-[1px] bg-slate-200 mx-1 hidden sm:block" />
+
+            {/* Status Filter Dropdown */}
+            <div className="flex items-center gap-1.5 bg-slate-50 rounded-xl px-2.5 py-1 border border-slate-200">
+              <Filter className="h-3.5 w-3.5 text-slate-400" />
+              <select
+                value={statusFilter}
+                onChange={(e) =>
+                  setStatusFilter(e.target.value as "all" | "unreviewed" | "confirmed" | "claimed" | "rejected")
+                }
+                className="bg-transparent text-xs text-slate-800 font-semibold focus:outline-none cursor-pointer"
+              >
+                <option value="all">All Statuses (Active)</option>
+                <option value="unreviewed">Unreviewed Only</option>
+                <option value="confirmed">Verified / Confirmed ({confirmedCount})</option>
+                <option value="claimed">✓ Claimed / Resolved ({claimedCount})</option>
+                <option value="rejected">Dismissed / Not a Match</option>
+              </select>
+            </div>
           </div>
 
           {/* Threshold Slider */}
@@ -169,7 +175,7 @@ export default function MatchesPage() {
             No Candidate Matches in this View
           </h4>
           <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
-            Try adjusting your score cutoff threshold slider above or switching the tier filter.
+            Try adjusting your score cutoff threshold slider above or switching the tier or review filter.
           </p>
         </div>
       ) : (

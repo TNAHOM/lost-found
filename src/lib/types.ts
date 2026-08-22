@@ -75,6 +75,7 @@ export interface CreateItemInput {
   holdingLocation?: string | null;
   isAnonymous?: boolean | null;
   status?: ItemStatus;
+  matchedItemId?: string | null;
   embedding?: string | null;
   createdAt?: string;
 }
@@ -82,6 +83,7 @@ export interface CreateItemInput {
 export interface UpdateItemInput {
   status?: ItemStatus;
   holdingLocation?: string;
+  matchedItemId?: string | null;
 }
 
 export interface MatchScoreBreakdown {
@@ -93,13 +95,6 @@ export interface MatchScoreBreakdown {
   isTimeValid: boolean; // false if found date significantly precedes lost date
 }
 
-export interface MatchHighlights {
-  sharedKeywords: string[];
-  locationMatchReason: string;
-  temporalReason: string;
-  categoryMatchReason: string;
-}
-
 export interface MatchResult {
   id: string;
   lostItem: LostFoundItem;
@@ -108,8 +103,29 @@ export interface MatchResult {
   matchTier: MatchTier;
   breakdown: MatchScoreBreakdown;
   explanation: string;
-  highlights: MatchHighlights;
   status: MatchStatus;
+  isSuperseded?: boolean;
+  supersededReason?: string;
+}
+
+export interface MatchRecord {
+  id: string;
+  lostItemId: string;
+  foundItemId: string;
+  status: MatchStatus;
+  overallScore?: number | null;
+  matchTier?: MatchTier | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MatchActionInput {
+  matchId: string;
+  lostItemId: string;
+  foundItemId: string;
+  action: "verify" | "claim" | "reject" | "unverify";
+  overallScore?: number;
+  matchTier?: MatchTier;
 }
 
 export interface FilterState {
@@ -133,6 +149,18 @@ export interface ApiResponse<T> {
 
 export interface ApiItemsResponse {
   items: LostFoundItem[];
+}
+
+export interface ApiMatchesResponse {
+  matches: MatchRecord[];
+}
+
+export interface ApiMatchActionResponse {
+  success: boolean;
+  match: MatchRecord;
+  lostItem?: LostFoundItem;
+  foundItem?: LostFoundItem;
+  message?: string;
 }
 
 export interface ApiItemResponse {

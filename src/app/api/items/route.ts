@@ -30,8 +30,28 @@ async function ensureTableAndData(): Promise<Item[]> {
       holding_location TEXT,
       is_anonymous INTEGER DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'open',
+      matched_item_id TEXT,
       embedding TEXT,
       created_at TEXT NOT NULL
+    )
+  `);
+
+  try {
+    await client.execute(`ALTER TABLE items ADD COLUMN matched_item_id TEXT`);
+  } catch {
+    // Column already exists
+  }
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS matches (
+      id TEXT PRIMARY KEY,
+      lost_item_id TEXT NOT NULL,
+      found_item_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unreviewed',
+      overall_score INTEGER,
+      match_tier TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     )
   `);
 
@@ -107,6 +127,7 @@ export async function POST(request: Request): Promise<NextResponse<ApiItemRespon
       holdingLocation: body.holdingLocation || null,
       isAnonymous: body.isAnonymous ?? false,
       status: body.status || "open",
+      matchedItemId: body.matchedItemId || null,
       embedding: embeddingJson,
       createdAt: body.createdAt || new Date().toISOString(),
     };

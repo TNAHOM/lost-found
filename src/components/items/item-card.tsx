@@ -7,16 +7,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatTimeOfDay, getCategoryColor, getCategoryLabel } from "@/lib/utils";
 import { useItems } from "@/lib/items-context";
-import { MapPin, Calendar, Building, Sparkles, ArrowRight, Zap } from "lucide-react";
+import { MapPin, Calendar, Building, Sparkles, ArrowRight, Zap, CheckCircle2, ShieldCheck } from "lucide-react";
 
 export function ItemCard({ item }: { item: LostFoundItem }) {
   const { getMatchesForItem } = useItems();
-  const itemMatches = getMatchesForItem(item.id);
-  const highMatch = itemMatches.find((m) => m.overallScore >= 80);
+  const allItemMatches = getMatchesForItem(item.id);
+
+  // Active matches (excluding superseded or rejected)
+  const activeMatches = allItemMatches.filter((m) => !m.isSuperseded && m.status !== "rejected");
+  const confirmedMatch = allItemMatches.find((m) => m.status === "confirmed");
+  const highMatch = activeMatches.find((m) => m.overallScore >= 80 && m.status !== "claimed");
   const categoryStyle = getCategoryColor(item.category);
 
   return (
-    <Card className="group flex flex-col justify-between overflow-hidden transition-all duration-200 hover:shadow-md hover:border-slate-300 bg-white border border-slate-200/90">
+    <Card
+      className={`group flex flex-col justify-between overflow-hidden transition-all duration-200 hover:shadow-md hover:border-slate-300 bg-white border ${
+        item.status === "claimed"
+          ? "border-emerald-200 bg-emerald-50/10"
+          : confirmedMatch
+          ? "border-blue-200 ring-1 ring-blue-100"
+          : "border-slate-200/90"
+      }`}
+    >
       <div className="space-y-3.5">
         {/* Card Header: Type Badge, Category, Search Relevance & Potential Match count */}
         <div className="flex items-center justify-between gap-2">
@@ -24,11 +36,19 @@ export function ItemCard({ item }: { item: LostFoundItem }) {
             <Badge variant={item.type === "lost" ? "lost" : "found"}>
               {item.type === "lost" ? "LOST" : "FOUND"}
             </Badge>
-            <span
-              className={`rounded-md px-2 py-0.5 text-[11px] font-bold border ${categoryStyle.bg} ${categoryStyle.border}`}
-            >
-              {getCategoryLabel(item.category)}
-            </span>
+
+            {item.status === "claimed" ? (
+              <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                <ShieldCheck className="h-3 w-3 text-emerald-700" />
+                <span>CLAIMED</span>
+              </span>
+            ) : (
+              <span
+                className={`rounded-md px-2 py-0.5 text-[11px] font-bold border ${categoryStyle.bg} ${categoryStyle.border}`}
+              >
+                {getCategoryLabel(item.category)}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -39,11 +59,11 @@ export function ItemCard({ item }: { item: LostFoundItem }) {
               </span>
             )}
 
-            {itemMatches.length > 0 && (
+            {item.status !== "claimed" && activeMatches.length > 0 && (
               <Link href="/matches">
                 <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors">
                   <Zap className="h-3 w-3 text-blue-600" />
-                  {itemMatches.length} match{itemMatches.length > 1 ? "es" : ""}
+                  {activeMatches.length} match{activeMatches.length > 1 ? "es" : ""}
                 </span>
               </Link>
             )}
@@ -89,8 +109,24 @@ export function ItemCard({ item }: { item: LostFoundItem }) {
           )}
         </div>
 
-        {/* Strong Match Callout Banner if detected */}
-        {highMatch && (
+        {/* Verified Match Callout */}
+        {confirmedMatch && item.status !== "claimed" && (
+          <div className="flex items-center justify-between rounded-xl bg-blue-50 p-2.5 text-xs text-blue-950 border border-blue-200">
+            <div className="flex items-center gap-1.5 font-bold text-blue-900">
+              <CheckCircle2 className="h-3.5 w-3.5 text-blue-600" />
+              <span>Verified Match Ready</span>
+            </div>
+            <Link
+              href="/matches"
+              className="text-[11px] font-bold text-blue-700 hover:underline"
+            >
+              View →
+            </Link>
+          </div>
+        )}
+
+        {/* Strong Match Callout Banner if detected and unconfirmed */}
+        {!confirmedMatch && highMatch && item.status !== "claimed" && (
           <div className="flex items-center justify-between rounded-xl bg-emerald-50 p-2.5 text-xs text-emerald-900 border border-emerald-200">
             <div className="flex items-center gap-1.5 font-bold">
               <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
@@ -115,7 +151,7 @@ export function ItemCard({ item }: { item: LostFoundItem }) {
           #{item.id.slice(0, 8)}
         </span>
         <Link href={`/items/${item.id}?type=${item.type}`}>
-          <Button variant="ghost" size="sm" className="h-7 text-xs px-2 gap-1 text-slate-600 hover:text-slate-900">
+          <Button variant="ghost" size="sm" className="h-7 text-xs px-2 gap-1 text-slate-600 hover:text-slate-900 cursor-pointer">
             <span>Details</span>
             <ArrowRight className="h-3 w-3" />
           </Button>

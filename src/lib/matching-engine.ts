@@ -341,17 +341,11 @@ export function evaluateItemMatch(lost: LostFoundItem, found: LostFoundItem): Ma
     found.date
   );
 
-  // Category match percentage
   const categoryMatch = lost.category === found.category ? 100 : 30;
-  const categoryMatchReason =
-    lost.category === found.category
-      ? `Exact category match (${lost.category})`
-      : `Different categories (${lost.category} vs ${found.category})`;
 
-  // Weighted overall calculation: 50% desc, 25% location, 25% time
   let overallScore = 0;
   if (!isTimeValid) {
-    overallScore = Math.round(descScore * 0.3); // Severe penalty if time sequence is invalid
+    overallScore = Math.round(descScore * 0.3);
   } else {
     overallScore = Math.round(0.5 * descScore + 0.25 * locScore + 0.25 * timeScore);
   }
@@ -363,7 +357,7 @@ export function evaluateItemMatch(lost: LostFoundItem, found: LostFoundItem): Ma
   if (overallScore >= 80) matchTier = "strong";
   else if (overallScore >= 60) matchTier = "moderate";
 
-  // Deterministic phrase-assembly engine (0 LLM overhead, instant, 100% factual)
+  // Deterministic phrase-assembly engine
   const explanation = assembleDeterministicExplanation({
     overallScore,
     matchTier,
@@ -392,19 +386,11 @@ export function evaluateItemMatch(lost: LostFoundItem, found: LostFoundItem): Ma
       isTimeValid,
     },
     explanation,
-    highlights: {
-      sharedKeywords,
-      locationMatchReason: locReason,
-      temporalReason: timeReason,
-      categoryMatchReason,
-    },
     status: "unreviewed",
   };
 }
 
-/**
- * Deterministic Phrase-Assembly Engine for Explainability
- */
+
 function assembleDeterministicExplanation(data: {
   overallScore: number;
   matchTier: MatchTier;

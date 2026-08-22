@@ -8,18 +8,26 @@ import { Badge } from "@/components/ui/badge";
 import { MatchBreakdownBar } from "./match-breakdown-bar";
 import { MatchComparisonModal } from "./match-comparison-modal";
 import { formatDate, getMatchTierMeta } from "@/lib/utils";
-import { Sparkles, ArrowRight } from "lucide-react";
+import { Sparkles, ArrowRight, CheckCircle2, ShieldCheck, AlertCircle, XCircle } from "lucide-react";
 
 export function MatchCard({ match }: { match: MatchResult }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const { lostItem, foundItem, overallScore, matchTier, breakdown, explanation, status } = match;
+  const { lostItem, foundItem, overallScore, matchTier, breakdown, explanation, status, isSuperseded, supersededReason } = match;
   const tierMeta = getMatchTierMeta(matchTier, overallScore);
 
   return (
     <>
       <Card
         className={`group relative overflow-hidden transition-all duration-200 hover:shadow-md bg-white border ${
-          matchTier === "strong"
+          isSuperseded && status !== "claimed"
+            ? "border-slate-200 opacity-60 bg-slate-50/60"
+            : status === "claimed"
+            ? "border-emerald-400 ring-2 ring-emerald-100/80 bg-emerald-50/10"
+            : status === "confirmed"
+            ? "border-blue-400 ring-2 ring-blue-100/80 bg-blue-50/10"
+            : status === "rejected"
+            ? "border-rose-200 opacity-60 bg-rose-50/20"
+            : matchTier === "strong"
             ? "border-emerald-300 hover:border-emerald-400 ring-1 ring-emerald-100"
             : matchTier === "moderate"
             ? "border-amber-300 hover:border-amber-400 ring-1 ring-amber-100"
@@ -29,7 +37,15 @@ export function MatchCard({ match }: { match: MatchResult }) {
         {/* Top Confidence Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white font-mono font-bold text-sm shadow-xs">
+            <div
+              className={`flex h-9 w-9 items-center justify-center rounded-xl font-mono font-bold text-sm shadow-xs ${
+                status === "claimed"
+                  ? "bg-emerald-700 text-white"
+                  : status === "confirmed"
+                  ? "bg-blue-700 text-white"
+                  : "bg-slate-900 text-white"
+              }`}
+            >
               {overallScore}%
             </div>
             <div>
@@ -43,25 +59,47 @@ export function MatchCard({ match }: { match: MatchResult }) {
           </div>
 
           <div className="flex items-center gap-2">
-            {status !== "unreviewed" && (
-              <Badge
-                variant={status === "claimed" || status === "confirmed" ? "success" : "default"}
-                className="text-[10px] uppercase font-bold"
-              >
-                {status}
+            {isSuperseded && status !== "claimed" ? (
+              <Badge variant="warning" className="text-[10px] font-bold flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                <span>Superseded</span>
               </Badge>
-            )}
+            ) : status === "claimed" ? (
+              <Badge variant="success" className="text-[10px] uppercase font-bold flex items-center gap-1">
+                <ShieldCheck className="h-3 w-3" />
+                <span>Claimed</span>
+              </Badge>
+            ) : status === "confirmed" ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
+                <CheckCircle2 className="h-3 w-3 text-blue-600" />
+                <span>Verified Match</span>
+              </span>
+            ) : status === "rejected" ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 border border-slate-200">
+                <XCircle className="h-3 w-3 text-slate-500" />
+                <span>Dismissed</span>
+              </span>
+            ) : null}
+
             <Button
               variant="outline"
               size="sm"
               onClick={() => setIsModalOpen(true)}
-              className="text-xs h-8 bg-white hover:bg-slate-900 hover:text-white border-slate-200 transition-colors"
+              className="text-xs h-8 bg-white hover:bg-slate-900 hover:text-white border-slate-200 transition-colors cursor-pointer"
             >
               <span>Compare</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
+
+        {/* Superseded notice banner */}
+        {isSuperseded && status !== "claimed" && (
+          <div className="mt-3 rounded-lg bg-amber-50 p-2 border border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
+            <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+            <span className="truncate">{supersededReason || "Item already claimed in another report."}</span>
+          </div>
+        )}
 
         {/* Paired Items Summary Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 my-3.5">
